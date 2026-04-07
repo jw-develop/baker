@@ -1,14 +1,4 @@
-.PHONY: build test lint clean
-
-build:
-	@echo "Building $(NAME)..."
-	@go build -o $(NAME) .
-
-test:
-	@go test ./...
-
-lint:
-	@go vet ./...
-
-clean:
-	@rm -f $(NAME)
+include $(MAKEFILE_INCLUDE_DIR)/deps.mk
+include $(MAKEFILE_INCLUDE_DIR)/build.mk
+include $(MAKEFILE_INCLUDE_DIR)/test.mk
+include $(MAKEFILE_INCLUDE_DIR)/lint.mk
