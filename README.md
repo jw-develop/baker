@@ -61,6 +61,88 @@ build:
 - `0`: All subdirectory targets succeeded
 - `1`: One or more targets failed (failed output is printed inline)
 
+## Example Project
+
+See the `example/` directory for a complete working monorepo setup demonstrating:
+
+```
+example/
+├── Makefile                    # Root orchestration with baker
+├── makefiles/
+│   ├── common.mk               # Aggregates all shared makefiles
+│   ├── deps.mk                 # install::, tidy::
+│   ├── build.mk                # build::, clean::
+│   ├── test.mk                 # test::, test-nocache::
+│   └── lint.mk                 # lint::
+├── hello-world/
+│   ├── Makefile
+│   ├── go.mod
+│   └── main.go
+└── sup-world/
+    ├── Makefile                # Extends install:: target
+    ├── go.mod
+    └── main.go
+```
+
+### Shared Makefiles
+
+Each subproject includes a single `common.mk` which aggregates modular makefiles:
+
+```makefile
+# makefiles/common.mk
+include $(MAKEFILE_INCLUDE_DIR)/deps.mk
+include $(MAKEFILE_INCLUDE_DIR)/build.mk
+include $(MAKEFILE_INCLUDE_DIR)/test.mk
+include $(MAKEFILE_INCLUDE_DIR)/lint.mk
+```
+
+Subprojects include it with a relative path:
+
+```makefile
+# hello-world/Makefile
+NAME := hello-world
+MAKEFILE_INCLUDE_DIR ?= ../makefiles
+
+include $(MAKEFILE_INCLUDE_DIR)/common.mk
+```
+
+### Double-Colon Targets (::)
+
+Shared makefiles use double-colon targets (`::`) which allow subprojects to extend them:
+
+```makefile
+# makefiles/deps.mk
+install::
+	@go mod download
+```
+
+```makefile
+# sup-world/Makefile - extends the base target
+install::
+	@echo "Installing additional sup-world requirements..."
+```
+
+When you run `make install` in sup-world, both rules execute. This pattern lets subprojects add custom behavior without overwriting shared logic.
+
+### Root Makefile
+
+The root Makefile uses baker to orchestrate parallel execution:
+
+```makefile
+SUBDIRS := hello-world sup-world
+
+# Tip: running plain "make" from here will emulate all CI tasks!
+all: tidy lint test
+
+test:
+	@baker -target test -title "T E S T" -color green $(SUBDIRS)
+
+lint:
+	@baker -target lint -title "L I N T" -color yellow $(SUBDIRS)
+```
+
+Running `make` executes tidy → lint → test sequentially, with each step running across all subdirectories in parallel.
+
 ## License
 
 MIT
