@@ -57,13 +57,13 @@ func main() {
 	title := flag.String("title", "", "Title to display in header")
 	color := flag.String("color", "", "Color name (green, yellow, magenta, blue, cyan, white)")
 	concurrency := flag.Int("concurrency", 0, "Max concurrent jobs (0 = unlimited)")
-	benchmark := flag.Bool("benchmark", false, "Benchmark all concurrency levels (1 to N, plus unlimited)")
+	benchmark := flag.Bool("benchmark", false, "Test all concurrency levels to find the fastest")
 	flag.Parse()
 
 	dirs := flag.Args()
 
 	if *target == "" || *title == "" || len(dirs) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: baker -target <target> -title <title> [-color <color>] [-concurrency <n>] <subdirs...>\n")
+		fmt.Fprintf(os.Stderr, "Usage: baker -target <target> -title <title> [-color <color>] [-concurrency <n>] [--benchmark] <subdirs...>\n")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
