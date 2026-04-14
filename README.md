@@ -11,7 +11,7 @@ go install github.com/jw-develop/baker@latest
 ## Usage
 
 ```bash
-baker -target <target> -title <title> -color <color> <subdirs...>
+baker -target <target> -title <title> [-color <color>] [-concurrency <n>] <subdirs...>
 ```
 
 ### Flags
@@ -21,11 +21,23 @@ baker -target <target> -title <title> -color <color> <subdirs...>
 | `-target` | Make target to run (required) |
 | `-title` | Title displayed in header (required) |
 | `-color` | Output color: green, yellow, magenta, blue, cyan, white |
+| `-concurrency` | Max concurrent jobs (0 = unlimited, default: 0) |
 
-### Example
+### Examples
 
+Run tests in parallel (default):
 ```bash
 baker -target test -title "T E S T" -color green api worker database
+```
+
+Run tests sequentially (one at a time):
+```bash
+baker -target test -title "T E S T" -color green -concurrency 1 api worker database
+```
+
+Run with limited parallelism (max 2 concurrent):
+```bash
+baker -target test -title "T E S T" -color green -concurrency 2 api worker database
 ```
 
 Output:
@@ -54,6 +66,10 @@ lint:
 
 build:
 	@baker -target build -title "B U I L D" -color blue $(SUBDIRS)
+
+# Run sequentially (useful for debugging or resource-constrained environments)
+test-sequential:
+	@baker -target test -title "T E S T" -color green -concurrency 1 $(SUBDIRS)
 ```
 
 ## Exit Codes

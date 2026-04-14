@@ -48,12 +48,13 @@ func main() {
 	target := flag.String("target", "", "Make target to run")
 	title := flag.String("title", "", "Title to display in header")
 	color := flag.String("color", "", "Color name (green, yellow, magenta, blue, cyan, white)")
+	concurrency := flag.Int("concurrency", 0, "Max concurrent jobs (0 = unlimited)")
 	flag.Parse()
 
 	dirs := flag.Args()
 
 	if *target == "" || *title == "" || len(dirs) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: baker -target <target> -title <title> -color <color> <subdirs...>\n")
+		fmt.Fprintf(os.Stderr, "Usage: baker -target <target> -title <title> [-color <color>] [-concurrency <n>] <subdirs...>\n")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -63,7 +64,7 @@ func main() {
 
 	printHeader(resolvedColor, *title)
 
-	results := runJobs(*target, dirs)
+	results := runJobs(*target, dirs, *concurrency)
 
 	failed := false
 	for result := range results {
@@ -91,8 +92,7 @@ func resolveColor(input string) string {
 	return ""
 }
 
-// runMake executes make -C dir target and captures output
-func runMake(target, dir string) JobResult {
+var runMake = func(target, dir string) JobResult {
 	start := time.Now()
 
 	cmd := exec.Command("make", "-C", dir, target)
@@ -115,15 +115,25 @@ func runMake(target, dir string) JobResult {
 	}
 }
 
-// runJobs launches all make jobs in parallel and streams results
-func runJobs(target string, dirs []string) <-chan JobResult {
+// runJobs launches make jobs with optional concurrency limit and streams results.
+// If concurrency <= 0, all jobs run in parallel (unlimited).
+func runJobs(target string, dirs []string, concurrency int) <-chan JobResult {
 	results := make(chan JobResult)
 	var wg sync.WaitGroup
+
+	var sem chan struct{}
+	if concurrency > 0 {
+		sem = make(chan struct{}, concurrency)
+	}
 
 	for _, dir := range dirs {
 		wg.Add(1)
 		go func(d string) {
 			defer wg.Done()
+			if sem != nil {
+				sem <- struct{}{}
+				defer func() { <-sem }()
+			}
 			result := runMake(target, d)
 			results <- result
 		}(dir)
