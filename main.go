@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -47,11 +46,9 @@ type JobResult struct {
 
 // BenchmarkResult holds timing results for a single concurrency level
 type BenchmarkResult struct {
-	Concurrency int
-	Durations   []time.Duration
-	AvgDuration time.Duration
-	MinDuration time.Duration
-	MaxDuration time.Duration
+	Concurrency int  // 0 means unlimited
+	NumDirs     int  // for display purposes
+	Duration    time.Duration
 	FailedJobs  int
 }
 
@@ -60,8 +57,7 @@ func main() {
 	title := flag.String("title", "", "Title to display in header")
 	color := flag.String("color", "", "Color name (green, yellow, magenta, blue, cyan, white)")
 	concurrency := flag.Int("concurrency", 0, "Max concurrent jobs (0 = unlimited)")
-	benchmark := flag.Int("benchmark", 0, "Max concurrency to benchmark (0 = NumCPU when flag present)")
-	iterations := flag.Int("iterations", 1, "Iterations per concurrency level in benchmark mode")
+	benchmark := flag.Bool("benchmark", false, "Benchmark all concurrency levels (1 to N, plus unlimited)")
 	flag.Parse()
 
 	dirs := flag.Args()
@@ -74,19 +70,11 @@ func main() {
 
 	resolvedColor := resolveColor(*color)
 
-	if *benchmark > 0 || hasBenchmarkFlag() {
-		maxConcurrency := *benchmark
-		if maxConcurrency == 0 {
-			maxConcurrency = runtime.NumCPU()
-		}
-		if *iterations < 1 {
-			fmt.Fprintf(os.Stderr, "Error: -iterations must be >= 1\n")
-			os.Exit(1)
-		}
-
-		printBenchmarkWarning(*target, len(dirs), maxConcurrency, *iterations)
-		results := runBenchmark(*target, dirs, maxConcurrency, *iterations)
-		printBenchmarkResults(resolvedColor, *title, results)
+	if *benchmark {
+		printBenchmarkWarning(*target, len(dirs))
+		results := runBenchmark(*target, dirs)
+		printBenchmarkResults(*target, results)
+		_ = resolvedColor
 
 		for _, r := range results {
 			if r.FailedJobs > 0 {
@@ -211,104 +199,97 @@ func printFooter(color string, duration time.Duration) {
 	fmt.Printf("%s%s%s\n", color, bar, reset)
 }
 
-func hasBenchmarkFlag() bool {
-	for _, arg := range os.Args[1:] {
-		if strings.HasPrefix(arg, "-benchmark") {
-			return true
+func runBenchmark(target string, dirs []string) []BenchmarkResult {
+	numDirs := len(dirs)
+	var results []BenchmarkResult
+
+	// Test concurrency numDirs down to 1
+	// First entry (numDirs) is labeled as "Unlimited" since all run in parallel
+	for c := numDirs; c >= 1; c-- {
+		start := time.Now()
+		jobResults := runJobs(target, dirs, c)
+		failedJobs := 0
+		for result := range jobResults {
+			if result.ExitCode != 0 {
+				failedJobs++
+			}
 		}
-	}
-	return false
-}
-
-func runBenchmark(target string, dirs []string, maxConcurrency int, iterations int) []BenchmarkResult {
-	results := make([]BenchmarkResult, maxConcurrency)
-
-	for c := 1; c <= maxConcurrency; c++ {
-		br := BenchmarkResult{
+		results = append(results, BenchmarkResult{
 			Concurrency: c,
-			Durations:   make([]time.Duration, iterations),
-		}
-
-		for i := 0; i < iterations; i++ {
-			start := time.Now()
-			jobResults := runJobs(target, dirs, c)
-
-			for result := range jobResults {
-				if result.ExitCode != 0 {
-					br.FailedJobs++
-				}
-			}
-
-			br.Durations[i] = time.Since(start)
-		}
-
-		var total time.Duration
-		br.MinDuration = br.Durations[0]
-		br.MaxDuration = br.Durations[0]
-		for _, d := range br.Durations {
-			total += d
-			if d < br.MinDuration {
-				br.MinDuration = d
-			}
-			if d > br.MaxDuration {
-				br.MaxDuration = d
-			}
-		}
-		br.AvgDuration = total / time.Duration(iterations)
-
-		results[c-1] = br
+			NumDirs:     numDirs,
+			Duration:    time.Since(start),
+			FailedJobs:  failedJobs,
+		})
 	}
 
 	return results
 }
 
-func printBenchmarkWarning(target string, numDirs int, maxConcurrency int, iterations int) {
-	totalRuns := maxConcurrency * iterations * numDirs
+func printBenchmarkWarning(target string, numDirs int) {
+	numLevels := numDirs
+	totalRuns := numLevels * numDirs
 	fmt.Printf("%sWARNING:%s This benchmark will run '%s' across %d directories\n",
 		yellow, reset, target, numDirs)
-	fmt.Printf("         %d times total (%d concurrency levels x %d iterations x %d dirs)\n",
-		totalRuns, maxConcurrency, iterations, numDirs)
+	fmt.Printf("         %d times total (%d concurrency levels x %d dirs)\n",
+		totalRuns, numLevels, numDirs)
 	fmt.Printf("         Ensure your target is safe to run repeatedly.\n\n")
 }
 
-func printBenchmarkResults(color string, title string, results []BenchmarkResult) {
-	printHeader(color, "BENCHMARK: "+title)
-	fmt.Println()
-
-	fmt.Printf("Concurrency   Avg Time    Min Time    Max Time    Speedup    Failures\n")
-	fmt.Printf("-----------   --------    --------    --------    -------    --------\n")
-
-	baseline := results[0].AvgDuration
+func printBenchmarkResults(target string, results []BenchmarkResult) {
 	fastestIdx := 0
 	for i, r := range results {
-		if r.AvgDuration < results[fastestIdx].AvgDuration {
+		if r.Duration < results[fastestIdx].Duration {
 			fastestIdx = i
 		}
 	}
 
-	for i, r := range results {
-		speedup := float64(baseline) / float64(r.AvgDuration)
-		marker := ""
-		if i == fastestIdx {
-			marker = "    ◀"
+	// Build column header with target name
+	targetTitle := strings.Title(target)
+	timeHeader := fmt.Sprintf("%s Time", targetTitle)
+
+	// Calculate column widths
+	concurrencyWidth := len("Concurrency")
+	for _, r := range results {
+		label := formatConcurrencyLabel(r)
+		if len(label) > concurrencyWidth {
+			concurrencyWidth = len(label)
 		}
-		fmt.Printf("%5d         %7.1fs    %7.1fs    %7.1fs    %5.2fx    %5d%s\n",
-			r.Concurrency,
-			r.AvgDuration.Seconds(),
-			r.MinDuration.Seconds(),
-			r.MaxDuration.Seconds(),
-			speedup,
-			r.FailedJobs,
-			marker)
 	}
 
-	fmt.Println()
-	best := results[fastestIdx]
-	speedup := float64(baseline) / float64(best.AvgDuration)
+	timeWidth := len(timeHeader)
+	for i, r := range results {
+		label := formatTimeLabel(r.Duration, i == fastestIdx)
+		if len(label) > timeWidth {
+			timeWidth = len(label)
+		}
+	}
 
-	bar := "══════════════════════════════════════════════════════════════════════════════"
-	fmt.Printf("%s%s%s\n", color, bar, reset)
-	fmt.Printf("%s   Recommendation: -concurrency %d (%.1fs, %.2fx speedup)%s\n",
-		color, best.Concurrency, best.AvgDuration.Seconds(), speedup, reset)
-	fmt.Printf("%s%s%s\n", color, bar, reset)
+	fmt.Println("Benchmark results:")
+
+	// Header row
+	fmt.Printf("  | %-*s | %-*s |\n", concurrencyWidth, "Concurrency", timeWidth, timeHeader)
+	// Separator row
+	fmt.Printf("  |-%s-|-%s-|\n", strings.Repeat("-", concurrencyWidth), strings.Repeat("-", timeWidth))
+
+	// Data rows
+	for i, r := range results {
+		concLabel := formatConcurrencyLabel(r)
+		timeLabel := formatTimeLabel(r.Duration, i == fastestIdx)
+		fmt.Printf("  | %-*s | %-*s |\n", concurrencyWidth, concLabel, timeWidth, timeLabel)
+	}
+}
+
+func formatConcurrencyLabel(r BenchmarkResult) string {
+	if r.Concurrency == r.NumDirs {
+		return fmt.Sprintf("%d (all parallel)", r.NumDirs)
+	}
+	return fmt.Sprintf("%d", r.Concurrency)
+}
+
+func formatTimeLabel(d time.Duration, isFastest bool) string {
+	timeStr := fmt.Sprintf("%.1fs", d.Seconds())
+	if isFastest {
+		return timeStr + " ← fastest"
+	}
+	return timeStr
 }

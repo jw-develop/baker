@@ -700,7 +700,7 @@ func TestRunJobs_DurationReflectsExecutionTimeNotWaitTime(t *testing.T) {
 	}
 }
 
-func TestRunBenchmark_SingleIteration(t *testing.T) {
+func TestRunBenchmark_ResultCount(t *testing.T) {
 	dirs := []string{"a", "b", "c"}
 	callCount := 0
 
@@ -711,47 +711,42 @@ func TestRunBenchmark_SingleIteration(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runBenchmark("test", dirs, 3, 1)
+	results := runBenchmark("test", dirs)
 
-	if len(results) != 3 {
-		t.Errorf("Expected 3 results, got %d", len(results))
+	// Should have len(dirs) results: concurrency len(dirs) down to 1
+	expectedResults := len(dirs)
+	if len(results) != expectedResults {
+		t.Errorf("Expected %d results, got %d", expectedResults, len(results))
 	}
 
-	expectedCalls := 3 * 3 * 1
+	// Total calls: numDirs levels * numDirs jobs = 3 * 3 = 9
+	expectedCalls := expectedResults * len(dirs)
 	if callCount != expectedCalls {
 		t.Errorf("Expected %d runMake calls, got %d", expectedCalls, callCount)
 	}
 
-	for i, r := range results {
-		if r.Concurrency != i+1 {
-			t.Errorf("Expected concurrency %d, got %d", i+1, r.Concurrency)
-		}
-		if len(r.Durations) != 1 {
-			t.Errorf("Expected 1 duration, got %d", len(r.Durations))
-		}
+	// First result should be max concurrency (all parallel)
+	if results[0].Concurrency != len(dirs) {
+		t.Errorf("First result should be %d (all parallel), got %d", len(dirs), results[0].Concurrency)
 	}
 }
 
-func TestRunBenchmark_MultipleIterations(t *testing.T) {
-	dirs := []string{"a", "b"}
+func TestRunBenchmark_ConcurrencyOrder(t *testing.T) {
+	dirs := []string{"a", "b", "c", "d"}
 
 	originalRunMake := runMake
 	runMake = func(target, dir string) JobResult {
-		time.Sleep(10 * time.Millisecond)
 		return JobResult{Dir: dir, ExitCode: 0}
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runBenchmark("test", dirs, 2, 3)
+	results := runBenchmark("test", dirs)
 
-	for _, r := range results {
-		if len(r.Durations) != 3 {
-			t.Errorf("Expected 3 durations for concurrency %d, got %d",
-				r.Concurrency, len(r.Durations))
-		}
-		if r.MinDuration > r.AvgDuration || r.AvgDuration > r.MaxDuration {
-			t.Errorf("Duration ordering violated: min=%v avg=%v max=%v",
-				r.MinDuration, r.AvgDuration, r.MaxDuration)
+	// Order should be: 4, 3, 2, 1
+	expectedOrder := []int{4, 3, 2, 1}
+	for i, expected := range expectedOrder {
+		if results[i].Concurrency != expected {
+			t.Errorf("Result %d: expected concurrency %d, got %d", i, expected, results[i].Concurrency)
 		}
 	}
 }
@@ -769,13 +764,12 @@ func TestRunBenchmark_FailureTracking(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runBenchmark("test", dirs, 2, 2)
+	results := runBenchmark("test", dirs)
 
 	for _, r := range results {
-		expectedFailures := 2
-		if r.FailedJobs != expectedFailures {
-			t.Errorf("Concurrency %d: expected %d failures, got %d",
-				r.Concurrency, expectedFailures, r.FailedJobs)
+		if r.FailedJobs != 1 {
+			t.Errorf("Concurrency %d: expected 1 failure, got %d",
+				r.Concurrency, r.FailedJobs)
 		}
 	}
 }
@@ -791,14 +785,19 @@ func TestRunBenchmark_SpeedupWithConcurrency(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runBenchmark("test", dirs, 4, 1)
+	results := runBenchmark("test", dirs)
 
-	if results[0].AvgDuration <= results[3].AvgDuration {
-		t.Errorf("Expected concurrency=1 (%v) to be slower than concurrency=4 (%v)",
-			results[0].AvgDuration, results[3].AvgDuration)
+	// Last result is concurrency=1 (sequential), should be slowest
+	// First result is all parallel, should be fastest
+	sequential := results[len(results)-1]
+	allParallel := results[0]
+
+	if allParallel.Duration >= sequential.Duration {
+		t.Errorf("Expected all parallel (%v) to be faster than sequential (%v)",
+			allParallel.Duration, sequential.Duration)
 	}
 
-	speedup := float64(results[0].AvgDuration) / float64(results[3].AvgDuration)
+	speedup := float64(sequential.Duration) / float64(allParallel.Duration)
 	if speedup < 2.0 {
 		t.Errorf("Expected >2x speedup, got %.2fx", speedup)
 	}
@@ -806,36 +805,36 @@ func TestRunBenchmark_SpeedupWithConcurrency(t *testing.T) {
 
 func TestPrintBenchmarkResults(t *testing.T) {
 	results := []BenchmarkResult{
-		{Concurrency: 1, AvgDuration: 4 * time.Second, MinDuration: 4 * time.Second, MaxDuration: 4 * time.Second, FailedJobs: 0},
-		{Concurrency: 2, AvgDuration: 2 * time.Second, MinDuration: 2 * time.Second, MaxDuration: 2 * time.Second, FailedJobs: 0},
-		{Concurrency: 3, AvgDuration: 1500 * time.Millisecond, MinDuration: 1500 * time.Millisecond, MaxDuration: 1500 * time.Millisecond, FailedJobs: 0},
-		{Concurrency: 4, AvgDuration: 1200 * time.Millisecond, MinDuration: 1200 * time.Millisecond, MaxDuration: 1200 * time.Millisecond, FailedJobs: 1},
+		{Concurrency: 4, NumDirs: 4, Duration: 1 * time.Second, FailedJobs: 0},
+		{Concurrency: 3, NumDirs: 4, Duration: 1200 * time.Millisecond, FailedJobs: 0},
+		{Concurrency: 2, NumDirs: 4, Duration: 2 * time.Second, FailedJobs: 0},
+		{Concurrency: 1, NumDirs: 4, Duration: 4 * time.Second, FailedJobs: 0},
 	}
 
 	output := captureOutput(func() {
-		printBenchmarkResults(green, "TEST", results)
+		printBenchmarkResults("lint", results)
 	})
 
-	if !strings.Contains(output, "BENCHMARK: TEST") {
-		t.Error("Output should contain benchmark title")
+	if !strings.Contains(output, "Benchmark results") {
+		t.Error("Output should contain 'Benchmark results'")
 	}
 	if !strings.Contains(output, "Concurrency") {
-		t.Error("Output should contain table header")
+		t.Error("Output should contain table header 'Concurrency'")
 	}
-	if !strings.Contains(output, "◀") {
+	if !strings.Contains(output, "Lint Time") {
+		t.Error("Output should contain 'Lint Time' column header")
+	}
+	if !strings.Contains(output, "← fastest") {
 		t.Error("Output should mark fastest result")
 	}
-	if !strings.Contains(output, "Recommendation") {
-		t.Error("Output should contain recommendation")
-	}
-	if !strings.Contains(output, "-concurrency 4") {
-		t.Error("Output should recommend concurrency 4 (fastest)")
+	if !strings.Contains(output, "4 (all parallel)") {
+		t.Error("Output should show all parallel label")
 	}
 }
 
 func TestPrintBenchmarkWarning(t *testing.T) {
 	output := captureOutput(func() {
-		printBenchmarkWarning("build", 5, 8, 2)
+		printBenchmarkWarning("build", 5)
 	})
 
 	if !strings.Contains(output, "WARNING") {
@@ -847,7 +846,45 @@ func TestPrintBenchmarkWarning(t *testing.T) {
 	if !strings.Contains(output, "5 directories") {
 		t.Error("Output should mention number of directories")
 	}
-	if !strings.Contains(output, "80 times total") {
-		t.Error("Output should show total runs (8*2*5=80)")
+	// 5 levels (1-5) * 5 dirs = 25 total
+	if !strings.Contains(output, "25 times total") {
+		t.Error("Output should show total runs (5*5=25)")
+	}
+}
+
+func TestFormatConcurrencyLabel(t *testing.T) {
+	tests := []struct {
+		result   BenchmarkResult
+		expected string
+	}{
+		{BenchmarkResult{Concurrency: 5, NumDirs: 5}, "5 (all parallel)"},
+		{BenchmarkResult{Concurrency: 1, NumDirs: 5}, "1"},
+		{BenchmarkResult{Concurrency: 3, NumDirs: 5}, "3"},
+	}
+
+	for _, tc := range tests {
+		got := formatConcurrencyLabel(tc.result)
+		if got != tc.expected {
+			t.Errorf("formatConcurrencyLabel(%+v) = %q, want %q", tc.result, got, tc.expected)
+		}
+	}
+}
+
+func TestFormatTimeLabel(t *testing.T) {
+	tests := []struct {
+		duration  time.Duration
+		isFastest bool
+		expected  string
+	}{
+		{1500 * time.Millisecond, false, "1.5s"},
+		{1500 * time.Millisecond, true, "1.5s ← fastest"},
+		{10 * time.Second, false, "10.0s"},
+	}
+
+	for _, tc := range tests {
+		got := formatTimeLabel(tc.duration, tc.isFastest)
+		if got != tc.expected {
+			t.Errorf("formatTimeLabel(%v, %v) = %q, want %q", tc.duration, tc.isFastest, got, tc.expected)
+		}
 	}
 }
