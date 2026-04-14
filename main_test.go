@@ -699,3 +699,155 @@ func TestRunJobs_DurationReflectsExecutionTimeNotWaitTime(t *testing.T) {
 		}
 	}
 }
+
+func TestRunBenchmark_SingleIteration(t *testing.T) {
+	dirs := []string{"a", "b", "c"}
+	callCount := 0
+
+	originalRunMake := runMake
+	runMake = func(target, dir string) JobResult {
+		callCount++
+		return JobResult{Dir: dir, ExitCode: 0}
+	}
+	defer func() { runMake = originalRunMake }()
+
+	results := runBenchmark("test", dirs, 3, 1)
+
+	if len(results) != 3 {
+		t.Errorf("Expected 3 results, got %d", len(results))
+	}
+
+	expectedCalls := 3 * 3 * 1
+	if callCount != expectedCalls {
+		t.Errorf("Expected %d runMake calls, got %d", expectedCalls, callCount)
+	}
+
+	for i, r := range results {
+		if r.Concurrency != i+1 {
+			t.Errorf("Expected concurrency %d, got %d", i+1, r.Concurrency)
+		}
+		if len(r.Durations) != 1 {
+			t.Errorf("Expected 1 duration, got %d", len(r.Durations))
+		}
+	}
+}
+
+func TestRunBenchmark_MultipleIterations(t *testing.T) {
+	dirs := []string{"a", "b"}
+
+	originalRunMake := runMake
+	runMake = func(target, dir string) JobResult {
+		time.Sleep(10 * time.Millisecond)
+		return JobResult{Dir: dir, ExitCode: 0}
+	}
+	defer func() { runMake = originalRunMake }()
+
+	results := runBenchmark("test", dirs, 2, 3)
+
+	for _, r := range results {
+		if len(r.Durations) != 3 {
+			t.Errorf("Expected 3 durations for concurrency %d, got %d",
+				r.Concurrency, len(r.Durations))
+		}
+		if r.MinDuration > r.AvgDuration || r.AvgDuration > r.MaxDuration {
+			t.Errorf("Duration ordering violated: min=%v avg=%v max=%v",
+				r.MinDuration, r.AvgDuration, r.MaxDuration)
+		}
+	}
+}
+
+func TestRunBenchmark_FailureTracking(t *testing.T) {
+	dirs := []string{"pass", "fail"}
+
+	originalRunMake := runMake
+	runMake = func(target, dir string) JobResult {
+		exitCode := 0
+		if dir == "fail" {
+			exitCode = 1
+		}
+		return JobResult{Dir: dir, ExitCode: exitCode}
+	}
+	defer func() { runMake = originalRunMake }()
+
+	results := runBenchmark("test", dirs, 2, 2)
+
+	for _, r := range results {
+		expectedFailures := 2
+		if r.FailedJobs != expectedFailures {
+			t.Errorf("Concurrency %d: expected %d failures, got %d",
+				r.Concurrency, expectedFailures, r.FailedJobs)
+		}
+	}
+}
+
+func TestRunBenchmark_SpeedupWithConcurrency(t *testing.T) {
+	dirs := []string{"a", "b", "c", "d"}
+	jobDuration := 30 * time.Millisecond
+
+	originalRunMake := runMake
+	runMake = func(target, dir string) JobResult {
+		time.Sleep(jobDuration)
+		return JobResult{Dir: dir, ExitCode: 0}
+	}
+	defer func() { runMake = originalRunMake }()
+
+	results := runBenchmark("test", dirs, 4, 1)
+
+	if results[0].AvgDuration <= results[3].AvgDuration {
+		t.Errorf("Expected concurrency=1 (%v) to be slower than concurrency=4 (%v)",
+			results[0].AvgDuration, results[3].AvgDuration)
+	}
+
+	speedup := float64(results[0].AvgDuration) / float64(results[3].AvgDuration)
+	if speedup < 2.0 {
+		t.Errorf("Expected >2x speedup, got %.2fx", speedup)
+	}
+}
+
+func TestPrintBenchmarkResults(t *testing.T) {
+	results := []BenchmarkResult{
+		{Concurrency: 1, AvgDuration: 4 * time.Second, MinDuration: 4 * time.Second, MaxDuration: 4 * time.Second, FailedJobs: 0},
+		{Concurrency: 2, AvgDuration: 2 * time.Second, MinDuration: 2 * time.Second, MaxDuration: 2 * time.Second, FailedJobs: 0},
+		{Concurrency: 3, AvgDuration: 1500 * time.Millisecond, MinDuration: 1500 * time.Millisecond, MaxDuration: 1500 * time.Millisecond, FailedJobs: 0},
+		{Concurrency: 4, AvgDuration: 1200 * time.Millisecond, MinDuration: 1200 * time.Millisecond, MaxDuration: 1200 * time.Millisecond, FailedJobs: 1},
+	}
+
+	output := captureOutput(func() {
+		printBenchmarkResults(green, "TEST", results)
+	})
+
+	if !strings.Contains(output, "BENCHMARK: TEST") {
+		t.Error("Output should contain benchmark title")
+	}
+	if !strings.Contains(output, "Concurrency") {
+		t.Error("Output should contain table header")
+	}
+	if !strings.Contains(output, "◀") {
+		t.Error("Output should mark fastest result")
+	}
+	if !strings.Contains(output, "Recommendation") {
+		t.Error("Output should contain recommendation")
+	}
+	if !strings.Contains(output, "-concurrency 4") {
+		t.Error("Output should recommend concurrency 4 (fastest)")
+	}
+}
+
+func TestPrintBenchmarkWarning(t *testing.T) {
+	output := captureOutput(func() {
+		printBenchmarkWarning("build", 5, 8, 2)
+	})
+
+	if !strings.Contains(output, "WARNING") {
+		t.Error("Output should contain WARNING")
+	}
+	if !strings.Contains(output, "build") {
+		t.Error("Output should contain target name")
+	}
+	if !strings.Contains(output, "5 directories") {
+		t.Error("Output should mention number of directories")
+	}
+	if !strings.Contains(output, "80 times total") {
+		t.Error("Output should show total runs (8*2*5=80)")
+	}
+}
