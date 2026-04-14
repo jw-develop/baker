@@ -670,3 +670,32 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 		}
 	}
 }
+
+func TestRunJobs_DurationReflectsExecutionTimeNotWaitTime(t *testing.T) {
+	dirs := []string{"a", "b", "c", "d"}
+	jobDuration := 50 * time.Millisecond
+
+	originalRunMake := runMake
+	runMake = func(target, dir string) JobResult {
+		start := time.Now()
+		time.Sleep(jobDuration)
+		return JobResult{
+			Dir:      dir,
+			ExitCode: 0,
+			Duration: time.Since(start),
+		}
+	}
+	defer func() { runMake = originalRunMake }()
+
+	results := runJobs("test", dirs, 1)
+
+	for result := range results {
+		if result.Duration < jobDuration {
+			t.Errorf("Job %s duration %v is less than job execution time %v", result.Dir, result.Duration, jobDuration)
+		}
+		maxExpected := jobDuration + 20*time.Millisecond
+		if result.Duration > maxExpected {
+			t.Errorf("Job %s duration %v exceeds expected max %v (should not include queue wait time)", result.Dir, result.Duration, maxExpected)
+		}
+	}
+}
