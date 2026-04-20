@@ -58,12 +58,13 @@ func main() {
 	color := flag.String("color", "", "Color name (green, yellow, magenta, blue, cyan, white)")
 	concurrency := flag.Int("concurrency", 0, "Max concurrent jobs (0 = unlimited)")
 	benchmark := flag.Bool("benchmark", false, "Test all concurrency levels to find the fastest")
+	verbose := flag.Bool("verbose", false, "Print detailed output for every step")
 	flag.Parse()
 
 	dirs := flag.Args()
 
 	if *target == "" || *title == "" || len(dirs) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: baker -target <target> -title <title> [-color <color>] [-concurrency <n>] [--benchmark] <subdirs...>\n")
+		fmt.Fprintf(os.Stderr, "Usage: baker -target <target> -title <title> [-color <color>] [-concurrency <n>] [--benchmark] [--verbose] <subdirs...>\n")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
@@ -72,7 +73,7 @@ func main() {
 
 	if *benchmark {
 		printBenchmarkWarning(*target, len(dirs))
-		results := runBenchmark(*target, dirs)
+		results := runBenchmark(*target, dirs, *verbose)
 		printBenchmarkResults(*target, results)
 		_ = resolvedColor
 
@@ -88,11 +89,11 @@ func main() {
 
 	printHeader(resolvedColor, *title)
 
-	results := runJobs(*target, dirs, *concurrency)
+	results := runJobs(*target, dirs, *concurrency, *verbose)
 
 	failed := false
 	for result := range results {
-		printResult(resolvedColor, result)
+		printResult(resolvedColor, result, *verbose)
 		if result.ExitCode != 0 {
 			failed = true
 		}
@@ -141,7 +142,7 @@ var runMake = func(target, dir string) JobResult {
 
 // runJobs launches make jobs with optional concurrency limit and streams results.
 // If concurrency <= 0, all jobs run in parallel (unlimited).
-func runJobs(target string, dirs []string, concurrency int) <-chan JobResult {
+func runJobs(target string, dirs []string, concurrency int, verbose bool) <-chan JobResult {
 	results := make(chan JobResult)
 	var wg sync.WaitGroup
 
@@ -157,6 +158,9 @@ func runJobs(target string, dirs []string, concurrency int) <-chan JobResult {
 			if sem != nil {
 				sem <- struct{}{}
 				defer func() { <-sem }()
+			}
+			if verbose {
+				fmt.Printf("%s→ Running:%s make -C %s %s\n", cyan, reset, d, target)
 			}
 			result := runMake(target, d)
 			results <- result
@@ -180,10 +184,13 @@ func printHeader(color, title string) {
 }
 
 // printResult prints success/failure line for one directory
-func printResult(color string, result JobResult) {
+func printResult(color string, result JobResult, verbose bool) {
 	elapsed := fmt.Sprintf("%.1fs", result.Duration.Seconds())
 	if result.ExitCode == 0 {
 		fmt.Printf("%s%s %s%s%s (%s)\n", green, checkmark, color, result.Dir, reset, elapsed)
+		if verbose && len(result.Output) > 0 {
+			_, _ = os.Stdout.Write(result.Output)
+		}
 	} else {
 		fmt.Printf("%s%s %s%s%s (%s)\n", cyan, xmark, color, result.Dir, reset, elapsed)
 		_, _ = os.Stdout.Write(result.Output)
@@ -199,7 +206,7 @@ func printFooter(color string, duration time.Duration) {
 	fmt.Printf("%s%s%s\n", color, bar, reset)
 }
 
-func runBenchmark(target string, dirs []string) []BenchmarkResult {
+func runBenchmark(target string, dirs []string, verbose bool) []BenchmarkResult {
 	numDirs := len(dirs)
 	var results []BenchmarkResult
 
@@ -207,7 +214,7 @@ func runBenchmark(target string, dirs []string) []BenchmarkResult {
 	// First entry (numDirs) is labeled as "Unlimited" since all run in parallel
 	for c := numDirs; c >= 1; c-- {
 		start := time.Now()
-		jobResults := runJobs(target, dirs, c)
+		jobResults := runJobs(target, dirs, c, verbose)
 		failedJobs := 0
 		for result := range jobResults {
 			if result.ExitCode != 0 {

@@ -98,7 +98,7 @@ func TestRunJobs_UnlimitedConcurrency(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("test", dirs, 0)
+	results := runJobs("test", dirs, 0, false)
 	for range results {
 	}
 
@@ -127,7 +127,7 @@ func TestRunJobs_ConcurrencyOne(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("test", dirs, 1)
+	results := runJobs("test", dirs, 1, false)
 	for range results {
 	}
 
@@ -156,7 +156,7 @@ func TestRunJobs_ConcurrencyTwo(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("test", dirs, 2)
+	results := runJobs("test", dirs, 2, false)
 	for range results {
 	}
 
@@ -189,7 +189,7 @@ func TestRunJobs_AllJobsComplete(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			results := runJobs("test", dirs, tc.concurrency)
+			results := runJobs("test", dirs, tc.concurrency, false)
 			count := 0
 			for range results {
 				count++
@@ -211,7 +211,7 @@ func TestRunJobs_PassesTargetCorrectly(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("custom-target", []string{"a", "b"}, 1)
+	results := runJobs("custom-target", []string{"a", "b"}, 1, false)
 	for range results {
 	}
 
@@ -233,7 +233,7 @@ func TestRunJobs_PassesDirCorrectly(t *testing.T) {
 	defer func() { runMake = originalRunMake }()
 
 	expectedDirs := []string{"dir-a", "dir-b", "dir-c"}
-	results := runJobs("test", expectedDirs, 0)
+	results := runJobs("test", expectedDirs, 0, false)
 	for range results {
 	}
 
@@ -254,7 +254,7 @@ func TestRunJobs_ReturnsAllResults(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("test", dirs, 1)
+	results := runJobs("test", dirs, 1, false)
 	resultMap := make(map[string]int)
 	for result := range results {
 		resultMap[result.Dir] = result.ExitCode
@@ -275,7 +275,7 @@ func TestRunJobs_EmptyDirs(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("test", []string{}, 0)
+	results := runJobs("test", []string{}, 0, false)
 	count := 0
 	for range results {
 		count++
@@ -293,7 +293,7 @@ func TestRunJobs_SingleDir(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("test", []string{"only-one"}, 1)
+	results := runJobs("test", []string{"only-one"}, 1, false)
 	count := 0
 	for result := range results {
 		count++
@@ -327,7 +327,7 @@ func TestRunJobs_ConcurrencyHigherThanDirs(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("test", dirs, 10)
+	results := runJobs("test", dirs, 10, false)
 	count := 0
 	for range results {
 		count++
@@ -361,7 +361,7 @@ func TestRunJobs_NegativeConcurrency(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("test", dirs, -1)
+	results := runJobs("test", dirs, -1, false)
 	for range results {
 	}
 
@@ -426,7 +426,7 @@ func TestPrintResult_Success(t *testing.T) {
 	}
 
 	output := captureOutput(func() {
-		printResult(blue, result)
+		printResult(blue, result, false)
 	})
 
 	if !strings.Contains(output, checkmark) {
@@ -452,7 +452,7 @@ func TestPrintResult_Failure(t *testing.T) {
 	}
 
 	output := captureOutput(func() {
-		printResult(yellow, result)
+		printResult(yellow, result, false)
 	})
 
 	if !strings.Contains(output, xmark) {
@@ -478,7 +478,7 @@ func TestPrintResult_FailureWithExitCode2(t *testing.T) {
 	}
 
 	output := captureOutput(func() {
-		printResult(green, result)
+		printResult(green, result, false)
 	})
 
 	if !strings.Contains(output, xmark) {
@@ -524,7 +524,7 @@ func TestRunJobs_PreservesOutput(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("build", []string{"proj"}, 1)
+	results := runJobs("build", []string{"proj"}, 1, false)
 	result := <-results
 
 	if !bytes.Equal(result.Output, expectedOutput) {
@@ -541,7 +541,7 @@ func TestRunJobs_PreservesDuration(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("build", []string{"proj"}, 1)
+	results := runJobs("build", []string{"proj"}, 1, false)
 	result := <-results
 
 	if result.Duration != expectedDuration {
@@ -592,7 +592,7 @@ func TestRunJobs_SequentialTiming(t *testing.T) {
 	defer func() { runMake = originalRunMake }()
 
 	start := time.Now()
-	results := runJobs("test", dirs, 1)
+	results := runJobs("test", dirs, 1, false)
 	for range results {
 	}
 	elapsed := time.Since(start)
@@ -615,7 +615,7 @@ func TestRunJobs_ParallelTiming(t *testing.T) {
 	defer func() { runMake = originalRunMake }()
 
 	start := time.Now()
-	results := runJobs("test", dirs, 0)
+	results := runJobs("test", dirs, 0, false)
 	for range results {
 	}
 	elapsed := time.Since(start)
@@ -646,7 +646,7 @@ func TestIntegration_FullWorkflow(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("build", dirs, 2)
+	results := runJobs("build", dirs, 2, false)
 
 	var successCount, failCount int
 	for result := range results {
@@ -687,7 +687,7 @@ func TestRunJobs_DurationReflectsExecutionTimeNotWaitTime(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runJobs("test", dirs, 1)
+	results := runJobs("test", dirs, 1, false)
 
 	for result := range results {
 		if result.Duration < jobDuration {
@@ -711,7 +711,7 @@ func TestRunBenchmark_ResultCount(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runBenchmark("test", dirs)
+	results := runBenchmark("test", dirs, false)
 
 	// Should have len(dirs) results: concurrency len(dirs) down to 1
 	expectedResults := len(dirs)
@@ -740,7 +740,7 @@ func TestRunBenchmark_ConcurrencyOrder(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runBenchmark("test", dirs)
+	results := runBenchmark("test", dirs, false)
 
 	// Order should be: 4, 3, 2, 1
 	expectedOrder := []int{4, 3, 2, 1}
@@ -764,7 +764,7 @@ func TestRunBenchmark_FailureTracking(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runBenchmark("test", dirs)
+	results := runBenchmark("test", dirs, false)
 
 	for _, r := range results {
 		if r.FailedJobs != 1 {
@@ -785,7 +785,7 @@ func TestRunBenchmark_SpeedupWithConcurrency(t *testing.T) {
 	}
 	defer func() { runMake = originalRunMake }()
 
-	results := runBenchmark("test", dirs)
+	results := runBenchmark("test", dirs, false)
 
 	// Last result is concurrency=1 (sequential), should be slowest
 	// First result is all parallel, should be fastest
@@ -886,5 +886,103 @@ func TestFormatTimeLabel(t *testing.T) {
 		if got != tc.expected {
 			t.Errorf("formatTimeLabel(%v, %v) = %q, want %q", tc.duration, tc.isFastest, got, tc.expected)
 		}
+	}
+}
+
+func TestRunJobs_VerbosePrintsRunningMessage(t *testing.T) {
+	originalRunMake := runMake
+	runMake = func(target, dir string) JobResult {
+		return JobResult{Dir: dir, ExitCode: 0}
+	}
+	defer func() { runMake = originalRunMake }()
+
+	output := captureOutput(func() {
+		results := runJobs("build", []string{"mydir"}, 1, true)
+		for range results {
+		}
+	})
+
+	if !strings.Contains(output, "→ Running:") {
+		t.Errorf("Verbose mode should print '→ Running:', got: %s", output)
+	}
+	if !strings.Contains(output, "make -C mydir build") {
+		t.Errorf("Verbose mode should print the make command, got: %s", output)
+	}
+}
+
+func TestRunJobs_NonVerboseNoRunningMessage(t *testing.T) {
+	originalRunMake := runMake
+	runMake = func(target, dir string) JobResult {
+		return JobResult{Dir: dir, ExitCode: 0}
+	}
+	defer func() { runMake = originalRunMake }()
+
+	output := captureOutput(func() {
+		results := runJobs("build", []string{"mydir"}, 1, false)
+		for range results {
+		}
+	})
+
+	if strings.Contains(output, "→ Running:") {
+		t.Errorf("Non-verbose mode should NOT print '→ Running:', got: %s", output)
+	}
+}
+
+func TestPrintResult_VerboseShowsSuccessOutput(t *testing.T) {
+	result := JobResult{
+		Dir:      "my-service",
+		ExitCode: 0,
+		Duration: 1 * time.Second,
+		Output:   []byte("build successful\n"),
+	}
+
+	output := captureOutput(func() {
+		printResult(green, result, true)
+	})
+
+	if !strings.Contains(output, "build successful") {
+		t.Errorf("Verbose mode should print success output, got: %s", output)
+	}
+}
+
+func TestPrintResult_NonVerboseHidesSuccessOutput(t *testing.T) {
+	result := JobResult{
+		Dir:      "my-service",
+		ExitCode: 0,
+		Duration: 1 * time.Second,
+		Output:   []byte("build successful\n"),
+	}
+
+	output := captureOutput(func() {
+		printResult(green, result, false)
+	})
+
+	if strings.Contains(output, "build successful") {
+		t.Errorf("Non-verbose mode should NOT print success output, got: %s", output)
+	}
+}
+
+func TestPrintResult_FailureAlwaysShowsOutput(t *testing.T) {
+	result := JobResult{
+		Dir:      "my-service",
+		ExitCode: 1,
+		Duration: 1 * time.Second,
+		Output:   []byte("error: build failed\n"),
+	}
+
+	// Test with verbose=false
+	output := captureOutput(func() {
+		printResult(green, result, false)
+	})
+	if !strings.Contains(output, "error: build failed") {
+		t.Errorf("Failure should always print output even without verbose, got: %s", output)
+	}
+
+	// Test with verbose=true
+	output = captureOutput(func() {
+		printResult(green, result, true)
+	})
+	if !strings.Contains(output, "error: build failed") {
+		t.Errorf("Failure should always print output with verbose, got: %s", output)
 	}
 }
